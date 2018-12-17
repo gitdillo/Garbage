@@ -1,5 +1,0 @@
-Utilities for generating and handling data relevant to drone litter detection.
-
-Scripts for Photoscan are kept separately under directory "Photoscan_scripts"
-
-Various utilities for manipulation of the data after information has been extracted from Photoscan are all inside "image_utils.py"

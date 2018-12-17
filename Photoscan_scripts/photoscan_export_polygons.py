@@ -1,6 +1,10 @@
 import PhotoScan
 import json
 
+
+output_file = 'C:/Users/x/Desktop/polygons.json'
+
+
 def model2pixel(point, camera, chunk):
 	""" Converts the coordinates of passed point from model coordinates to camera (pixel) coordinates for the passed camera and chunk. """
 	T = chunk.transform.matrix #4x4 transformation matrix
@@ -46,7 +50,8 @@ for i in range(len(chunk.cameras)):
 		continue
 	image_data.append({"image": chunk.cameras[i].label, "shapes": get_all_shapes_in_camera(chunk.cameras[i], chunk)})
 
-path = 'C:/Users/x/Desktop/polygons.json'
-f = open(path, 'w')
-json.dump(image_data, f)
-f.close()
+
+with open(output_file, 'w') as f:
+	json.dump(image_data, f, indent=4, sort_keys=True)
+
+print("Polygons saved in file: " + output_file)
