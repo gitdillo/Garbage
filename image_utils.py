@@ -230,12 +230,4 @@ def prep_dataset(dataset_path, target_width=500, target_height=500, roi_padding 
             os.mkdir(roi_dir_path)
 
         crop_image(image_path, annotation_path, max(0, roi['xmin'] - roi_padding), max(0, roi['ymin'] - roi_padding), roi['xmax'] - roi['xmin'] + 2*roi_padding, roi['ymax'] - roi['ymin'] + 2*roi_padding, roi_dir_path)
-
-
         
-
-
-
-
-
-
