@@ -198,6 +198,8 @@ def get_image_ROI(voc_file):
     the image in format: [[xmin, ymin], [xmax, ymax]]
     '''
     data = parse_VOC(voc_file)
+    if not data('shapes'):
+        return None
     xmax = data['shapes'][0]['xmax']
     ymax = data['shapes'][0]['ymax']
     xmin = data['shapes'][0]['xmin']
@@ -361,6 +363,8 @@ def dataset_crop_to_ROI(dataset_path, output_directory, roi_padding = 10):
             print('No annotations file found for image file: ' + str(image) + '. Skipping.')
 
         roi = get_image_ROI(annotation_path)
+        if roi is None:
+            continue
 
         if not os.path.isdir(output_directory):
             os.mkdir(output_directory)
