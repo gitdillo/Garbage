@@ -198,7 +198,7 @@ def get_image_ROI(voc_file):
     the image in format: [[xmin, ymin], [xmax, ymax]]
     '''
     data = parse_VOC(voc_file)
-    if not data('shapes'):
+    if not data['shapes']:
         return None
     xmax = data['shapes'][0]['xmax']
     ymax = data['shapes'][0]['ymax']
