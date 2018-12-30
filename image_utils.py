@@ -165,7 +165,7 @@ def crop_image(image_file, voc_file, x, y, width, height, output_directory, outp
         return
     # Reaching here means we have done our file and path tests and we are OK to write our outputs
     # First we do the image file
-    image = Image.open(data['path'])
+    image = Image.open(image_file)
     x2 = min(image.width, x+width)
     y2 = min(image.height, y+height)
     imc=image.crop((x, y, x2, y2))
@@ -333,20 +333,36 @@ def slice_to_tiles(image_file, tile_width, tile_height, output_directory, annota
 
     data = parse_VOC(voc_file)
     height, width = (cv2.imread(image_file)).shape[0:2]
-    horizontal_tiles = (width / tile_width) + 1
-    vertical_tiles = (height / tile_height) + 1
-    horizontal_step = (width - tile_width) / (horizontal_tiles - 1)
-    vertical_step = (height - tile_height) / (vertical_tiles - 1)
+    horizontal_tiles = int((width / tile_width) + 1)
+    vertical_tiles = int((height / tile_height) + 1)
+    horizontal_step = int((width - tile_width) / (horizontal_tiles - 1))
+    vertical_step = int((height - tile_height) / (vertical_tiles - 1))
 
     for h in range(horizontal_tiles):
         for v in range(vertical_tiles):
             cb = get_safe_crop_boundaries(
                 data, h*horizontal_step, v*vertical_step, tile_width, tile_height)
+            if not contains_items(data, cb['x'], cb['y'], cb['width'], cb['height']):
+                continue
             outname = os.path.splitext(os.path.basename(image_file))[
                 0] + '_' + str(h) + '-' + str(v)
             crop_image(image_file, voc_file, cb['x'], cb['y'], cb['width'], cb['height'],
                        output_directory, output_filename=outname)
 
+
+def contains_items(data, x, y, width, height):
+    '''
+    Returns True of the region of image whose contents are stored
+    in "data" (the dict returned by parsing a VOC xml file via
+    "parse_VOC(voc_file)") contains any shapes. For the return to
+    be true, the shape must lie wholy within the region, not sliced
+    by any of its boundaries.    
+    '''
+    for shape in data['shapes']:
+        if (x <= shape['xmin'] <= (x + width)) and (x <= shape['xmax'] <= (x + width)) and (y <= shape['ymin'] <= y + height) and (y <= shape['ymax'] <= y + height):
+            return True
+    return False
+    
 
 def dataset_crop_to_ROI(dataset_path, output_directory, roi_padding = 10):
 
