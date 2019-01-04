@@ -109,7 +109,7 @@ def display_annotated_image(image_file, annotation_file=None, save=False):
                     text=label_str,
                     org=(item['xmin'], item['ymin']),
                     fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=.4e-3 * image.shape[0],
+                    fontScale=.8e-3 * image.shape[0],
                     color=(0,0,0),
                     thickness=2)
     if save:
@@ -363,6 +363,21 @@ def contains_items(data, x, y, width, height):
             return True
     return False
     
+
+def get_labels(annotation_dir):
+    '''
+    Returns a list of the labels seen in the annotation files of
+    passed "annotation_directory"
+    '''
+    labels = set()
+    filelist = os.listdir(annotation_dir)
+    for file in filelist:
+        if file.endswith('xml'):
+            data = parse_VOC(os.path.join(annotation_dir, file))
+            for shape in data['shapes']:
+                labels.add(shape['label'])
+    return list(labels)
+
 
 def dataset_crop_to_ROI(dataset_path, output_directory, roi_padding = 10):
 
