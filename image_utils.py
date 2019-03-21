@@ -6,6 +6,48 @@ import xml.etree.ElementTree as ET
 import cv2
 import Tkinter
 import pdb
+import numpy as np
+
+def select_largest_obj(img_bin, lab_val=255, fill_holes=False, smooth_boundary=False, kernel_size=15):
+  '''Select the largest object from a binary image and optionally
+  fill holes inside it and smooth its boundary.
+  Args:
+  img_bin (2D array): 2D numpy array of binary image.
+      lab_val ([int]): integer value used for the label of the largest 
+              object. Default is 255.
+      fill_holes ([boolean]): whether fill the holes inside the largest 
+              object or not. Default is false.
+      smooth_boundary ([boolean]): whether smooth the boundary of the 
+              largest object using morphological opening or not. Default 
+              is false.
+      kernel_size ([int]): the size of the kernel used for morphological 
+              operation. Default is 15.
+  Returns:
+      a binary image as a mask for the largest object.
+  '''
+  n_labels, img_labeled, lab_stats, _ = \
+      cv2.connectedComponentsWithStats(img_bin, connectivity=8,
+                                       ltype=cv2.CV_32S)
+  largest_obj_lab = np.argmax(lab_stats[1:, 4]) + 1
+  largest_mask = np.zeros(img_bin.shape, dtype=np.uint8)
+  largest_mask[img_labeled == largest_obj_lab] = lab_val
+  # import pdb; pdb.set_trace()
+  if fill_holes:
+      bkg_locs = np.where(img_labeled == 0)
+      bkg_seed = (bkg_locs[0][0], bkg_locs[1][0])
+      img_floodfill = largest_mask.copy()
+      h_, w_ = largest_mask.shape
+      mask_ = np.zeros((h_ + 2, w_ + 2), dtype=np.uint8)
+      cv2.floodFill(img_floodfill, mask_, seedPoint=bkg_seed,
+                    newVal=lab_val)
+      holes_mask = cv2.bitwise_not(img_floodfill)  # mask of the holes.
+      largest_mask = largest_mask + holes_mask
+  if smooth_boundary:
+      kernel_ = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+      largest_mask = cv2.morphologyEx(largest_mask, cv2.MORPH_OPEN,
+                                      kernel_)
+
+  return largest_mask
 
 def vertices2boundingbox(vertex_list):
     '''Takes a vertex list defining a polygon (list of 2-element coord lists)
@@ -335,8 +377,14 @@ def slice_to_tiles(image_file, tile_width, tile_height, output_directory, annota
     height, width = (cv2.imread(image_file)).shape[0:2]
     horizontal_tiles = int((width / tile_width) + 1)
     vertical_tiles = int((height / tile_height) + 1)
-    horizontal_step = int((width - tile_width) / (horizontal_tiles - 1))
-    vertical_step = int((height - tile_height) / (vertical_tiles - 1))
+    if horizontal_tiles > 1:
+        horizontal_step = int((width - tile_width) / (horizontal_tiles - 1))
+    else:
+        horizontal_step = 0
+    if vertical_tiles > 1:
+        vertical_step = int((height - tile_height) / (vertical_tiles - 1))
+    else:
+        vertical_step = 0
 
     for h in range(horizontal_tiles):
         for v in range(vertical_tiles):
@@ -416,5 +464,69 @@ def dataset_to_tiles(dataset_path, tile_width, tile_height, output_directory):
         image_path = os.path.join(dataset_path, image)
         slice_to_tiles(image_path, tile_width, tile_height,
                        output_directory)
+
+
+def display_image(input_image, height=1000):
+    '''
+    Quick and dirty image viewer.
+    Args:
+        input_image: an image, as numpy array as loaded by cv2.imread()
+        height: desired height in pixels, default 1000
+    '''
+    dims = input_image.shape
+    scale = float(height) / float(dims[0])
+    im_scaled = cv2.resize(
+        input_image, (int(scale * dims[1]), int(scale * dims[0])))
+    # make sure we cast to uint8 so we can handle other dtypes gracefully
+    cv2.imshow('image', im_scaled.astype(np.uint8))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+def create_item_image(input_image_path, out_image_path, threshold=50):
+    '''
+    Takes an input image of an item and saves an image cropped to the item's bounding box
+    and all non-item space filled with transparency.
+    The input image is expected to only contain the item against a background as black as possible.
+    The idea is that the resulting image can be pasted into any arbitrary image to create a composite
+    containing the item.
+    Args:
+        input_image_path: path to the input image.
+        out_image_path: path to the image to save as output. The result will be a PNG with transparency.
+        threshold: threshold to filter black / white values once input has been converted to grayscale.
+    Returns:
+        True for successful saving of the output image, False otherwise.
+    '''
+
+    # Get the input
+    input_image = cv2.imread(input_image_path)
+    if input_image is None:
+        return False
+
+    # Convert to grayscale
+    img = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
+
+    # Convert to binary via a hard cutoff
+    img[np.where(img >= threshold)] = 255
+    img[np.where(img < threshold)] = 0
+
+    # Grab the biggest item (hopefully our item), in case more items slipped through the BW conversion
+    img = select_largest_obj(img, fill_holes = False)
+    
+    # Add our mask as an alpha channel to the original image
+    b, g, r = cv2.split(input_image)
+    out_img = cv2.merge((b, g, r, img))
+
+    # Crop the image
+    cnt = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)  # get contours from the mask
+    x, y, w, h = cv2.boundingRect(cnt[1][0])   # get the (straight) bounding rectangle
+    out_img = out_img[y:y+h, x:x+w]            # crop the whole image
+
+    # Write out the result
+    if os.path.isfile(out_image_path):
+        print('Error: output file already exists')
+    ext = os.path.splitext(out_image_path)[1]
+    if not ext == '.png' or ext == '.PNG':
+        out_image_path += '.png'
+    cv2.imwrite(out_image_path, out_img)
 
 
