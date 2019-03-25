@@ -7,6 +7,7 @@ import cv2
 import Tkinter
 import pdb
 import numpy as np
+import math
 
 def select_largest_obj(img_bin, lab_val=255, fill_holes=False, smooth_boundary=False, kernel_size=15):
   '''Select the largest object from a binary image and optionally
@@ -482,7 +483,7 @@ def display_image(input_image, height=1000):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def create_item_image(input_image_path, out_image_path, threshold=50):
+def create_minimal_image(input_image_path, out_image_path, threshold=50):
     '''
     Takes an input image of an item and saves an image cropped to the item's bounding box
     and all non-item space filled with transparency.
@@ -522,11 +523,101 @@ def create_item_image(input_image_path, out_image_path, threshold=50):
     out_img = out_img[y:y+h, x:x+w]            # crop the whole image
 
     # Write out the result
-    if os.path.isfile(out_image_path):
-        print('Error: output file already exists')
     ext = os.path.splitext(out_image_path)[1]
     if not ext == '.png' or ext == '.PNG':
         out_image_path += '.png'
+    if os.path.isfile(out_image_path):
+        print('Error: output file already exists')
     cv2.imwrite(out_image_path, out_img)
 
 
+def scale_minimal_image(input_image_path, out_image_path, longest_dim_pixels, resize_mode='INTER_AREA'):
+    '''Rescales a minimal image, i.e. a PNG with alpha channel of a litter item as created by 
+    "create_minimal_image()", so that its longest dimension in pixels is equal to "longest_dim_pixels".
+    The result is saved in out_file_path, as a 4 channel PNG (RGB + alpha).
+    Args:
+        input_image_path: path to the input image.
+        out_image_path: path to the image to save as output. The result will be a PNG with transparency.
+        longest_dim_pixels: desired length in pixels of the longest dimension in the output image
+        resize_mode (optional, default 'INTER_AREA'): code for the interpolation method as described in:
+            https://docs.opencv.org/2.4/modules/imgproc/doc/geometric_transformations.html#resize
+        Possible values are:
+            INTER_NEAREST - a nearest-neighbor interpolation
+            INTER_LINEAR - a bilinear interpolation (used by default)
+            INTER_AREA - resampling using pixel area relation.
+            INTER_CUBIC - a bicubic interpolation over 4x4 pixel neighborhood
+            INTER_LANCZOS4 - a Lanczos interpolation over 8x8 pixel neighborhood
+    Returns:
+        True for successful saving of the output image, False otherwise.
+    '''
+
+    img = cv2.imread(input_image_path, cv2.IMREAD_UNCHANGED)
+    dims = img.shape
+    scale = float(longest_dim_pixels) / max(dims)
+    new_width = int(dims[1] * scale)
+    new_height = int(dims[0] * scale)
+
+    if resize_mode == 'INTER_NEAREST':
+        interpolation = cv2.INTER_NEAREST
+    elif resize_mode == 'INTER_LINEAR':
+        interpolation = cv2.INTER_LINEAR
+    elif resize_mode == 'INTER_AREA':
+        interpolation = cv2.INTER_AREA
+    elif resize_mode == 'INTER_CUBIC':
+        interpolation = cv2.INTER_CUBIC
+    elif resize_mode == 'INTER_LANCZOS4':
+        interpolation = cv2.INTER_LANCZOS4
+    else:
+        print("Error, resize_mode: " + str(resize_mode) + " not recognised.\nValid modes are:\nINTER_NEAREST\nINTER_LINEAR\nINTER_AREA\nINTER_CUBIC\nINTER_LANCZOS4")
+        return False
+
+    # resize the image
+    out_img = cv2.resize(
+        img, (new_width, new_height), interpolation=interpolation)
+    
+    # Write out the result
+    ext = os.path.splitext(out_image_path)[1]
+    if not ext == '.png' or ext == '.PNG':
+        out_image_path += '.png'
+    if os.path.isfile(out_image_path):
+        print('Error: output file already exists')
+    cv2.imwrite(out_image_path, out_img)
+
+
+def rotate_image(img, angle):
+    dims = img.shape
+    new_length = int(math.ceil(max(dims) * math.sqrt(2)))
+    vert_pad = int(math.ceil((new_length - dims[0]) / 2.0))
+    hor_pad = int(math.ceil((new_length - dims[1]) / 2.0))
+    img = cv2.copyMakeBorder(img, vert_pad, vert_pad, hor_pad,
+                       hor_pad, cv2.BORDER_CONSTANT, value=0)
+    dims = img.shape
+    M = cv2.getRotationMatrix2D((dims[1] / 2, dims[0] / 2), angle, 1)
+    img = cv2.warpAffine(img, M, (dims[1], dims[0]))
+    return img
+
+
+def paste_minimal_image(min_image_path, background_image_path, x, y, rotation=0, annotation_file=None):
+
+    print("Not ready yet, need to add rotation")
+    return
+
+    min_img = cv2.imread(min_image_path, cv2.IMREAD_UNCHANGED)
+    back_img = cv2.imread(background_image_path, cv2.IMREAD_UNCHANGED)
+
+    r, g, b, alpha = cv2.split(min_img)
+    foreground = cv2.merge((r, g, b))
+    min_dims = min_img.shape
+    background = back_img[x:x + min_dims[0], y:y + min_dims[1]]
+
+    foreground = foreground.astype(float)
+    background = background.astype(float)
+
+    alpha = alpha.astype(float) / 255
+
+    background = cv2.merge((cv2.multiply(1.0 - alpha, cv2.split(background)[0]), cv2.multiply(1.0 - alpha, cv2.split(background)[1]), cv2.multiply(1.0 - alpha, cv2.split(background)[2])))
+    foreground = cv2.merge((cv2.multiply(alpha, cv2.split(foreground)[0]), cv2.multiply(alpha, cv2.split(foreground)[1]), cv2.multiply(alpha, cv2.split(foreground)[2])))
+
+    blend = cv2.add(foreground, background)
+
+    back_img[x:x + min_dims[0], y:y + min_dims[1]] = blend
