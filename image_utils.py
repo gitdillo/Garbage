@@ -486,6 +486,7 @@ def display_image(input_image, height=1000):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
+
 def create_minimal_image(input_image_path, out_image_path, threshold=50):
     '''
     Takes an input image of an item and saves an image cropped to the item's bounding box
@@ -578,84 +579,6 @@ def scale_minimal_image(input_image_path, longest_dim_pixels, resize_mode='INTER
     return out_img
 
 
-def paste_minimal_image(minimal_image_path, background_image_path, out_image_path, x, y, label, rotation_angle=0, in_annotation_file=None, out_annotation_file=None, longest_dim_pixels=30, resize_mode='INTER_AREA'):
-    '''
-    Loosely based on the following tutorial by Sunita Nayak:
-    https://www.learnopencv.com/tag/alpha-blending/
-    Takes a minimal image, expected to be a 4 channel PNG and blends it with a background image at given location and rotation.
-    Output is a blended image saved at "out_image_path" and associated annotation file in PASCAL VOC format with .xml extension.
-    Args:
-        minimal_image_path: path to a 4 channel PNG minimal image as created by "create_minimal_image()"
-        background_image_path: the path to background image where our min image will be pasted
-        out_image_path: path where the blended image will be saved
-        x, y: coordinates where the min image will be pasted in the background image
-        label: string describing the type of object in the minimal image
-        rotation_angle=0: rotation to be applied to the min image
-        in_annotation_file: path to annotation file in PASCAL VOC format that accompanies the input file. If None, it will be searched for wth the same base filename as "background_image_path" and .xml extension.
-        out_annotation_file: path for annotation file in PASCAL VOC format that will accompanies the output file. If None, it will be the same base filename as "out_image_path" with .xml extension. If a valid "in_annotation_file" has been found, its contents will be included in the "out_annotation_file". If the "out_annotation_file" is the same as the "in_annotation_file", the latter will be overwritten.
-        longest_dim_pixels (default 30), resize_mode (default 'INTER_AREA'): params passed under the hood to scale_minimal_image() and control the scaling factor and method for the minimal image. See scale_minimal_image() for details on options.
-    Returns:
-        True for successful writing of output files, False otherwise
-    '''
-    # Grab an appropriately scaled version of the minimal image
-    min_img = scale_minimal_image(minimal_image_path, longest_dim_pixels, resize_mode)
-    # Grab out background image
-    back_img = cv2.imread(background_image_path, cv2.IMREAD_UNCHANGED)
-
-    # Rotate our minimal image
-    min_img = rotate_bound(min_img, rotation_angle)
-
-    # Make the mask, foreground and background slice where we will paste
-    r, g, b, alpha = cv2.split(min_img)
-    foreground = cv2.merge((r, g, b))
-    min_dims = min_img.shape
-    #background = back_img[x:x + min_dims[0], y:y + min_dims[1]]
-    background = back_img[y:y + min_dims[0], x:x + min_dims[1]]
-
-    # Cast all into appropriate types
-    foreground = foreground.astype(float)
-    background = background.astype(float)
-
-    # Convert alpha to 0-1 range
-    alpha = alpha.astype(float) / 255
-
-    # Apply mask and blend fg and bg
-    background = cv2.merge((cv2.multiply(1.0 - alpha, cv2.split(background)[0]), cv2.multiply(1.0 - alpha, cv2.split(background)[1]), cv2.multiply(1.0 - alpha, cv2.split(background)[2])))
-    foreground = cv2.merge((cv2.multiply(alpha, cv2.split(foreground)[0]), cv2.multiply(alpha, cv2.split(foreground)[1]), cv2.multiply(alpha, cv2.split(foreground)[2])))
-    blend = cv2.add(foreground, background)
-
-    # Paste the edited slice into the larger background image
-    #back_img[x:x + min_dims[0], y:y + min_dims[1]] = blend
-    back_img[y:y + min_dims[0], x:x + min_dims[1]] = blend
-
-
-    # Write out the resulting image
-    if os.path.isfile(out_image_path):
-        # print('Error: output file already exists')
-        # return False
-        pass
-    else:
-        cv2.imwrite(out_image_path, back_img)
-
-    # Write out annotation file
-    writer = Writer(background_image_path, back_img.shape[1], back_img.shape[0])
-    writer.addObject(label, x, y, x + min_dims[1], y + min_dims[0])
-
-    # Check if we have been explicitly passed an annotation file, if not, we need to create one
-    if in_annotation_file is None:
-        in_annotation_file = str(os.path.splitext(out_image_path)[0]) + '.xml'
-    # If our in annotation file (passed or created) exists, we need to get its contents
-    previous_data = None
-    if os.path.isfile(in_annotation_file):
-        previous_data = parse_VOC(in_annotation_file)
-        for s in previous_data['shapes']:
-            writer.addObject(s['label'], s['xmin'], s['ymin'], s['xmax'], s['ymax'])
-    
-    writer.save(out_annotation_file)
-
-    return True
-
-
 def rotate_bound(image, angle):
     '''
     Copied from Adrian Rosebrock's code at:
@@ -683,3 +606,96 @@ def rotate_bound(image, angle):
 
     # perform the actual rotation and return the image
     return cv2.warpAffine(image, M, (nW, nH))
+
+
+def blend_alpha_image(min_img, back_img, x, y):
+    '''
+    Loosely based on the following tutorial by Sunita Nayak:
+    https://www.learnopencv.com/tag/alpha-blending/
+    Pastes an image with alpha channel into a larger background image and returns the result.
+    The idea is that images with transparent backgrounds will be pasted into background images at known locations to be used for training neural networks.
+    Args:
+        min_img: the smaller image with alpha channel. This can be loaded via scale_minimal_image() and possibly further rotated via rotate_bound() before being passed to blend_alpha_image().
+        back_img: a background image, which has to be larger than the the minimal image
+        x, y: coords for the top right corner location in the background image to paste the minimal image
+    Returns:
+        (image, (xmin, ymin, xmax, ymax)) where image is the resulting blended image and (xmin, ymin, xmax, ymax) are the coordinates of the bounding box of the pasted minimal image.
+        If the pasting location is such that the minimal image does not fit, returns None.
+    '''
+    # Make the mask, foreground and background slice where we will paste
+    r, g, b, alpha = cv2.split(min_img)
+    foreground = cv2.merge((r, g, b))
+    min_dims = min_img.shape
+    back_dims = back_img.shape
+    if (y + min_dims[0] > back_dims[0]) or (x + min_dims[1] > back_dims[1]): # check that we are not dropping off the edges of the background image
+        return None
+    background = back_img[y:y + min_dims[0], x:x + min_dims[1]]
+
+    # Cast all into appropriate types
+    foreground = foreground.astype(float)
+    background = background.astype(float)
+
+    # Convert alpha to 0-1 range
+    alpha = alpha.astype(float) / 255
+
+    # Apply mask and blend fg and bg
+    background = cv2.merge((cv2.multiply(1.0 - alpha, cv2.split(background)[0]), cv2.multiply(
+        1.0 - alpha, cv2.split(background)[1]), cv2.multiply(1.0 - alpha, cv2.split(background)[2])))
+    foreground = cv2.merge((cv2.multiply(alpha, cv2.split(foreground)[0]), cv2.multiply(
+        alpha, cv2.split(foreground)[1]), cv2.multiply(alpha, cv2.split(foreground)[2])))
+    blend = cv2.add(foreground, background)
+
+    # Paste the edited slice into the larger background image
+    back_img[y:y + min_dims[0], x:x + min_dims[1]] = blend
+
+    return back_img, (x, y, x + min_dims[1], y + min_dims[0])
+
+def create_composite_image(min_img_dict, background_image_path, output_image_path, output_annotation_path=None):
+    '''
+    Creates a composite image of multiple minimal images pasted against a background image. The idea is to create images of items at known locations in order to train neural networks.
+    The minimal images are 4 channel PNGs with alpha channel as created by create_minimal_image() and are passed as a list of dictionaries containing information about where and how to paste them.
+    The background image is expected to be an image of a suitable background for training the neural networks.
+    Args:
+        min_img_dict: a list of dictionaries, each of which has to contain the following keys:
+            path: path to the minimal image. This has to be PNG with alpha channel (4 channel)
+            label: label of the item depicted in the minimal image
+            longest_dimension: longest dimension of the minimal image after scaling as described in "scale_minimal_image()"
+            rotation_angle: angle to rotate the minimal image as described in "rotate_bound()"
+            x, y: location in background image to paste top right corner of minimal image
+            resize_mode: OPTIONAL key, if present, works as described in "scale_minimal_image()".
+        background_image_path: path to the background image.
+        output_image_path: path to save resulting composite
+        output_annotation_path: OPTIONAL path for the annotation file in PASCAL VOC format. If missing, it will be created with the same base filename as "output_image_path" but with an .xml extension.
+    Returns:
+        If either the output_image_path or output_annotation_path, the results are NOT saved and the function returns false. Otherwise, returns the composite image.
+    '''
+    # Grab out background image
+    back_img = cv2.imread(background_image_path, cv2.IMREAD_UNCHANGED)
+
+    # Create a writer object for the annotation file
+    writer = Writer(output_image_path, back_img.shape[1], back_img.shape[0])
+
+    # Paste the list of minimal images in the background image
+    for im in min_img_dict:
+        if 'resize_mode' in im:
+            min_img = scale_minimal_image(im['path'], im['longest_dimension'], resize_mode=im['resize_mode'])
+        else:
+            min_img = scale_minimal_image(im['path'], im['longest_dimension'])
+        min_img = rotate_bound(min_img, im['rotation_angle'])
+        back_img, bounding_box = blend_alpha_image(min_img, back_img, im['x'], im['y'])
+        writer.addObject(im['label'], bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3])
+
+    if output_annotation_path is None:
+        output_annotation_path = os.path.splitext(output_image_path)[0] + '.xml'
+
+    # Write out the resulting image
+    if os.path.isfile(output_image_path):
+        print('Error: output image file already exists')
+        return False
+    # Write out the annotation file
+    if os.path.isfile(output_annotation_path):
+        print('Error: output annotation file already exists')
+        return False
+    cv2.imwrite(output_image_path, back_img)
+    writer.save(output_annotation_path)
+    return back_img
