@@ -472,10 +472,13 @@ def display_image(input_image, height=1000):
     Quick and dirty image viewer.
     Args:
         input_image: an image, as numpy array as loaded by cv2.imread()
-        height: desired height in pixels, default 1000
+        height: desired height in pixels, default 1000. If set to 0, no scaling will be applied
     '''
     dims = input_image.shape
-    scale = float(height) / float(dims[0])
+    if height == 0:
+        scale = 1.0
+    else:
+        scale = float(height) / float(dims[0])
     im_scaled = cv2.resize(
         input_image, (int(scale * dims[1]), int(scale * dims[0])))
     # make sure we cast to uint8 so we can handle other dtypes gracefully
@@ -531,13 +534,11 @@ def create_minimal_image(input_image_path, out_image_path, threshold=50):
     cv2.imwrite(out_image_path, out_img)
 
 
-def scale_minimal_image(input_image_path, out_image_path, longest_dim_pixels, resize_mode='INTER_AREA'):
+def scale_minimal_image(input_image_path, longest_dim_pixels, resize_mode='INTER_AREA'):
     '''Rescales a minimal image, i.e. a PNG with alpha channel of a litter item as created by 
     "create_minimal_image()", so that its longest dimension in pixels is equal to "longest_dim_pixels".
-    The result is saved in out_file_path, as a 4 channel PNG (RGB + alpha).
     Args:
         input_image_path: path to the input image.
-        out_image_path: path to the image to save as output. The result will be a PNG with transparency.
         longest_dim_pixels: desired length in pixels of the longest dimension in the output image
         resize_mode (optional, default 'INTER_AREA'): code for the interpolation method as described in:
             https://docs.opencv.org/2.4/modules/imgproc/doc/geometric_transformations.html#resize
@@ -548,9 +549,8 @@ def scale_minimal_image(input_image_path, out_image_path, longest_dim_pixels, re
             INTER_CUBIC - a bicubic interpolation over 4x4 pixel neighborhood
             INTER_LANCZOS4 - a Lanczos interpolation over 8x8 pixel neighborhood
     Returns:
-        True for successful saving of the output image, False otherwise.
-    '''
-
+        The scaled 4 channel image
+    ''' 
     img = cv2.imread(input_image_path, cv2.IMREAD_UNCHANGED)
     dims = img.shape
     scale = float(longest_dim_pixels) / max(dims)
@@ -575,49 +575,111 @@ def scale_minimal_image(input_image_path, out_image_path, longest_dim_pixels, re
     out_img = cv2.resize(
         img, (new_width, new_height), interpolation=interpolation)
     
-    # Write out the result
-    ext = os.path.splitext(out_image_path)[1]
-    if not ext == '.png' or ext == '.PNG':
-        out_image_path += '.png'
-    if os.path.isfile(out_image_path):
-        print('Error: output file already exists')
-    cv2.imwrite(out_image_path, out_img)
+    return out_img
 
 
-def rotate_image(img, angle):
-    dims = img.shape
-    new_length = int(math.ceil(max(dims) * math.sqrt(2)))
-    vert_pad = int(math.ceil((new_length - dims[0]) / 2.0))
-    hor_pad = int(math.ceil((new_length - dims[1]) / 2.0))
-    img = cv2.copyMakeBorder(img, vert_pad, vert_pad, hor_pad,
-                       hor_pad, cv2.BORDER_CONSTANT, value=0)
-    dims = img.shape
-    M = cv2.getRotationMatrix2D((dims[1] / 2, dims[0] / 2), angle, 1)
-    img = cv2.warpAffine(img, M, (dims[1], dims[0]))
-    return img
-
-
-def paste_minimal_image(min_image_path, background_image_path, x, y, rotation=0, annotation_file=None):
-
-    print("Not ready yet, need to add rotation")
-    return
-
-    min_img = cv2.imread(min_image_path, cv2.IMREAD_UNCHANGED)
+def paste_minimal_image(minimal_image_path, background_image_path, out_image_path, x, y, label, rotation_angle=0, in_annotation_file=None, out_annotation_file=None, longest_dim_pixels=30, resize_mode='INTER_AREA'):
+    '''
+    Loosely based on the following tutorial by Sunita Nayak:
+    https://www.learnopencv.com/tag/alpha-blending/
+    Takes a minimal image, expected to be a 4 channel PNG and blends it with a background image at given location and rotation.
+    Output is a blended image saved at "out_image_path" and associated annotation file in PASCAL VOC format with .xml extension.
+    Args:
+        minimal_image_path: path to a 4 channel PNG minimal image as created by "create_minimal_image()"
+        background_image_path: the path to background image where our min image will be pasted
+        out_image_path: path where the blended image will be saved
+        x, y: coordinates where the min image will be pasted in the background image
+        label: string describing the type of object in the minimal image
+        rotation_angle=0: rotation to be applied to the min image
+        in_annotation_file: path to annotation file in PASCAL VOC format that accompanies the input file. If None, it will be searched for wth the same base filename as "background_image_path" and .xml extension.
+        out_annotation_file: path for annotation file in PASCAL VOC format that will accompanies the output file. If None, it will be the same base filename as "out_image_path" with .xml extension. If a valid "in_annotation_file" has been found, its contents will be included in the "out_annotation_file". If the "out_annotation_file" is the same as the "in_annotation_file", the latter will be overwritten.
+        longest_dim_pixels (default 30), resize_mode (default 'INTER_AREA'): params passed under the hood to scale_minimal_image() and control the scaling factor and method for the minimal image. See scale_minimal_image() for details on options.
+    Returns:
+        True for successful writing of output files, False otherwise
+    '''
+    # Grab an appropriately scaled version of the minimal image
+    min_img = scale_minimal_image(minimal_image_path, longest_dim_pixels, resize_mode)
+    # Grab out background image
     back_img = cv2.imread(background_image_path, cv2.IMREAD_UNCHANGED)
 
+    # Rotate our minimal image
+    min_img = rotate_bound(min_img, rotation_angle)
+
+    # Make the mask, foreground and background slice where we will paste
     r, g, b, alpha = cv2.split(min_img)
     foreground = cv2.merge((r, g, b))
     min_dims = min_img.shape
-    background = back_img[x:x + min_dims[0], y:y + min_dims[1]]
+    #background = back_img[x:x + min_dims[0], y:y + min_dims[1]]
+    background = back_img[y:y + min_dims[0], x:x + min_dims[1]]
 
+    # Cast all into appropriate types
     foreground = foreground.astype(float)
     background = background.astype(float)
 
+    # Convert alpha to 0-1 range
     alpha = alpha.astype(float) / 255
 
+    # Apply mask and blend fg and bg
     background = cv2.merge((cv2.multiply(1.0 - alpha, cv2.split(background)[0]), cv2.multiply(1.0 - alpha, cv2.split(background)[1]), cv2.multiply(1.0 - alpha, cv2.split(background)[2])))
     foreground = cv2.merge((cv2.multiply(alpha, cv2.split(foreground)[0]), cv2.multiply(alpha, cv2.split(foreground)[1]), cv2.multiply(alpha, cv2.split(foreground)[2])))
-
     blend = cv2.add(foreground, background)
 
-    back_img[x:x + min_dims[0], y:y + min_dims[1]] = blend
+    # Paste the edited slice into the larger background image
+    #back_img[x:x + min_dims[0], y:y + min_dims[1]] = blend
+    back_img[y:y + min_dims[0], x:x + min_dims[1]] = blend
+
+
+    # Write out the resulting image
+    if os.path.isfile(out_image_path):
+        # print('Error: output file already exists')
+        # return False
+        pass
+    else:
+        cv2.imwrite(out_image_path, back_img)
+
+    # Write out annotation file
+    writer = Writer(background_image_path, back_img.shape[1], back_img.shape[0])
+    writer.addObject(label, x, y, x + min_dims[1], y + min_dims[0])
+
+    # Check if we have been explicitly passed an annotation file, if not, we need to create one
+    if in_annotation_file is None:
+        in_annotation_file = str(os.path.splitext(out_image_path)[0]) + '.xml'
+    # If our in annotation file (passed or created) exists, we need to get its contents
+    previous_data = None
+    if os.path.isfile(in_annotation_file):
+        previous_data = parse_VOC(in_annotation_file)
+        for s in previous_data['shapes']:
+            writer.addObject(s['label'], s['xmin'], s['ymin'], s['xmax'], s['ymax'])
+    
+    writer.save(out_annotation_file)
+
+    return True
+
+
+def rotate_bound(image, angle):
+    '''
+    Copied from Adrian Rosebrock's code at:
+    https://www.pyimagesearch.com/2017/01/02/rotate-images-correctly-with-opencv-and-python/
+    '''
+    # grab the dimensions of the image and then determine the
+    # center
+    (h, w) = image.shape[:2]
+    (cX, cY) = (w // 2, h // 2)
+
+    # grab the rotation matrix (applying the negative of the
+    # angle to rotate clockwise), then grab the sine and cosine
+    # (i.e., the rotation components of the matrix)
+    M = cv2.getRotationMatrix2D((cX, cY), -angle, 1.0)
+    cos = np.abs(M[0, 0])
+    sin = np.abs(M[0, 1])
+
+    # compute the new bounding dimensions of the image
+    nW = int((h * sin) + (w * cos))
+    nH = int((h * cos) + (w * sin))
+
+    # adjust the rotation matrix to take into account translation
+    M[0, 2] += (nW / 2) - cX
+    M[1, 2] += (nH / 2) - cY
+
+    # perform the actual rotation and return the image
+    return cv2.warpAffine(image, M, (nW, nH))
