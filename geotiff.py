@@ -1,0 +1,131 @@
+from osgeo import gdal, ogr, osr
+
+def SliceDatasetToFile(ds, output, x, y, width, height):
+    driver = gdal.GetDriverByName("GTiff")
+    dst_ds = driver.Create(output, 
+       width, 
+       height, 
+       ds.RasterCount, 
+       gdal.GDT_Float32
+    )
+
+    f = WriteChunkedGTiff(ds, dst_ds, x, y, width, height)
+
+    # Some hack, doesn't leave translation empty if using returned dataset.
+    f.ReadAsArray()
+    f.FlushCache()
+
+    print(f"Built {output}")
+
+    return f
+
+def SliceDataset(ds, x, y, width, height):
+    driver = gdal.GetDriverByName("MEM")
+    dst_ds = driver.Create("", 
+       width, 
+       height, 
+       ds.RasterCount, 
+       gdal.GDT_Float32
+    )
+
+    return WriteChunkedGTiff(ds, dst_ds, x, y, width, height)
+
+def DatasetToJPEG(ds, output = None):
+    geo = ds.GetGeoTransform()
+
+    originX = geo[0]
+    originY = geo[3]
+
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(ds.GetProjection())
+
+    srsLatLong = srs.CloneGeogCS()
+    ct = osr.CoordinateTransformation(srs, srsLatLong)
+
+    coords = ct.TransformPoint(originX, originY)
+
+    (path, auxPath) = GTifToJPEG(ds, 3, output)
+
+    return (path, coords, auxPath)
+
+memo = {
+    "jpegIdx": 1
+}
+def GTifToJPEG(tif, bandCount, output = None):
+    options = [
+        "-ot Byte",
+        "-of PNG",
+    ]
+
+    for bandIdx in range(1, bandCount + 1):
+        options.append(f"-b {bandIdx}")
+
+    if (output == None):
+        jpegIdx = memo.get("jpegIdxIdx", 1)
+        output = f"/vsimem/inmemjpeg{jpegIdx}.jpg"
+        memo["jpegIdx"] = jpegIdx + 1
+
+    gdal.Translate(output, tif, options = " ".join(options))
+    return (output, output + ".aux.xml")
+
+def WriteChunkedGTiff(ds, dst_ds, x, y, width, height):
+    gt = ds.GetGeoTransform()
+    cols = ds.RasterXSize
+    rows = ds.RasterYSize
+
+    # Write all raster layers to new file
+    for bandIdx in range(1, ds.RasterCount + 1):
+        band = ds.GetRasterBand(bandIdx)
+        data = band.ReadAsArray(x, y, width, height)
+        dst_ds.GetRasterBand(bandIdx).WriteArray(data)
+
+    coords = GetCoordinatesFromPixelBox(gt, cols, rows, x, y, width, height)
+
+    # top left x, w-e pixel resolution, rotation, top left y, rotation, n-s pixel resolution
+    new_transformation = [coords[0], gt[1], gt[2], coords[1], gt[4], gt[5]]
+    dst_ds.SetGeoTransform(new_transformation)
+
+    wkt = ds.GetProjection()
+
+    # setting spatial reference of output raster 
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(wkt)
+    dst_ds.SetProjection( srs.ExportToWkt() )
+
+    return dst_ds
+
+def GetExtent(gt, cols, rows):
+    ext=[]
+
+    xarr=[0, cols]
+    yarr=[0, rows]
+
+    for px in xarr:
+        for py in yarr:
+            x = gt[0] + (px * gt[1]) + (py * gt[2])
+            y = gt[3] + (px * gt[4]) + (py * gt[5])
+
+            ext.append([x, y])
+
+        yarr.reverse()
+
+    return ext
+
+def GetCoordinatesFromPixelBox(gt, cols, rows, x, y, width, height):
+    ext = GetExtent(gt, cols, rows)
+
+    xOrigin = gt[0]
+    yOrigin = gt[3]
+
+    bottomLeft, topLeft, topRight, bottomRight = ext
+    xlen = topRight[0] - topLeft[0]
+    ylen = bottomRight[1] - topRight[1]
+
+    # Notice the negative leap with regards to Y.
+    return [
+        xOrigin + (x / cols) * xlen,
+        yOrigin - (y / rows) * ylen,
+        xOrigin + ((x + width) / cols) * xlen,
+        yOrigin - ((y + height) / rows) * ylen,
+    ]
+
