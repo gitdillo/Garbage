@@ -8,6 +8,7 @@ import Tkinter
 import pdb
 import numpy as np
 import math
+import random
 
 def select_largest_obj(img_bin, lab_val=255, fill_holes=False, smooth_boundary=False, kernel_size=15):
   '''Select the largest object from a binary image and optionally
@@ -627,7 +628,8 @@ def blend_alpha_image(min_img, back_img, x, y):
     foreground = cv2.merge((r, g, b))
     min_dims = min_img.shape
     back_dims = back_img.shape
-    if (y + min_dims[0] > back_dims[0]) or (x + min_dims[1] > back_dims[1]): # check that we are not dropping off the edges of the background image
+    if (y + min_dims[0] > back_dims[0]) or (x + min_dims[1] > back_dims[1]):  # check that we are not dropping off the edges of the background image
+        print('Error in blend_alpha_image(): blending images with required foreground params would result in image beyond edges of background. Returning None.')
         return None
     background = back_img[y:y + min_dims[0], x:x + min_dims[1]]
 
@@ -650,7 +652,7 @@ def blend_alpha_image(min_img, back_img, x, y):
 
     return back_img, (x, y, x + min_dims[1], y + min_dims[0])
 
-def create_composite_image(min_img_dict, background_image_path, output_image_path, output_annotation_path=None):
+def create_composite_image(min_img_dict, background_image, output_image_path, output_annotation_path=None):
     '''
     Creates a composite image of multiple minimal images pasted against a background image. The idea is to create images of items at known locations in order to train neural networks.
     The minimal images are 4 channel PNGs with alpha channel as created by create_minimal_image() and are passed as a list of dictionaries containing information about where and how to paste them.
@@ -663,14 +665,23 @@ def create_composite_image(min_img_dict, background_image_path, output_image_pat
             rotation_angle: angle to rotate the minimal image as described in "rotate_bound()"
             x, y: location in background image to paste top right corner of minimal image
             resize_mode: OPTIONAL key, if present, works as described in "scale_minimal_image()".
-        background_image_path: path to the background image.
+        background_image: either a path to the background image or an image object as loaded by cv2.imread().
         output_image_path: path to save resulting composite
         output_annotation_path: OPTIONAL path for the annotation file in PASCAL VOC format. If missing, it will be created with the same base filename as "output_image_path" but with an .xml extension.
     Returns:
-        If either the output_image_path or output_annotation_path, the results are NOT saved and the function returns false. Otherwise, returns the composite image.
+        If the all goes well and output files can be written into, rerturns the composite image as an object. Otherwise, the results are NOT saved and returns False.
     '''
-    # Grab out background image
-    back_img = cv2.imread(background_image_path, cv2.IMREAD_UNCHANGED)
+    # Grab our background image
+    if isinstance(background_image, np.ndarray):
+        back_img = background_image
+    elif isinstance(background_image, str):
+        if os.path.isfile(background_image):
+            back_img = cv2.imread(background_image, cv2.IMREAD_UNCHANGED)
+        else:
+            print('Error: argument background_image does not point to a valid image file.')
+    else:
+        print('Error: argument background_image has to be either a path to an image file or be an image object (numpy.ndarray)')
+        return False
 
     # Create a writer object for the annotation file
     writer = Writer(output_image_path, back_img.shape[1], back_img.shape[0])
@@ -682,7 +693,11 @@ def create_composite_image(min_img_dict, background_image_path, output_image_pat
         else:
             min_img = scale_minimal_image(im['path'], im['longest_dimension'])
         min_img = rotate_bound(min_img, im['rotation_angle'])
-        back_img, bounding_box = blend_alpha_image(min_img, back_img, im['x'], im['y'])
+        try:
+            back_img, bounding_box = blend_alpha_image(min_img, back_img, im['x'], im['y'])
+        except:     # blending that would paste foreground beyond egdes of background returns None...
+            return False    # ...in which case, we just exit with False
+        
         writer.addObject(im['label'], bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3])
 
     if output_annotation_path is None:
@@ -699,3 +714,48 @@ def create_composite_image(min_img_dict, background_image_path, output_image_pat
     cv2.imwrite(output_image_path, back_img)
     writer.save(output_annotation_path)
     return back_img
+
+
+def generate_random_pasted_set(label, longest_dimension, min_image_dir, background_image_dir, output_directory, number_of_output_images, max_items_per_image, output_width_pixels=500, output_height_pixels=500, randomise_resize_mode=True):
+    
+    # Parse the input directories for valid file types
+    background_files = [i for i in os.listdir(background_image_dir) if ((os.path.splitext(i)[1]).lower() == '.jpg' or (os.path.splitext(i)[1]).lower() == '.png')]
+    min_image_files = [i for i in os.listdir(min_image_dir) if ((os.path.splitext(i)[1]).lower() == '.jpg' or (os.path.splitext(i)[1]).lower() == '.png')]
+
+    for i in range(number_of_output_images):
+        # Grab a random background image
+        back_path = os.path.join(
+            background_image_dir, background_files[random.randint(0, len(background_files) - 1)])
+        back_img = cv2.imread(back_path, cv2.IMREAD_UNCHANGED)
+
+        # Grab a random piece of the the background image of max dimensions output_width_pixels x output_height_pixels
+        dims = back_img.shape
+        x0 = 0
+        y0 = 0
+        if dims[0] > output_height_pixels:
+            y0 = random.randint(0, dims[0] - output_height_pixels)
+        if dims[1] > output_width_pixels:
+            x0 = random.randint(0, dims[1] - output_width_pixels)
+        back_img = back_img[y0: y0+output_height_pixels,
+                            x0: x0+output_width_pixels]
+
+        # Make a list of dictionaries as needed for function create_composite_image()
+        min_img_dict = []
+        # Note: we will produce a random number of dict entries between 1 and "max_items_per_image"
+        for j in range(random.randint(1, max_items_per_image)):
+            dims = back_img.shape
+            d = {}
+            d['path'] = os.path.join(min_image_dir, min_image_files[random.randint(
+                0, len(min_image_files) - 1)])  # get a path to a random min image
+            d['label'] = label
+            d['longest_dimension'] = longest_dimension
+            d['rotation_angle'] = random.randint(0, 359)
+            d['y'] = random.randint(0, dims[0] - longest_dimension)
+            d['x'] = random.randint(0, dims[1] - longest_dimension)
+            if randomise_resize_mode:
+                d['resize_mode'] = random.sample(
+                    ['INTER_NEAREST', 'INTER_LINEAR', 'INTER_AREA', 'INTER_CUBIC', 'INTER_LANCZOS4'], 1)[0]
+            min_img_dict.append(d)
+
+        output_image_path = os.path.join(output_directory, 'composite_' + str(i) + '.jpg')
+        create_composite_image(min_img_dict, back_img,output_image_path)
