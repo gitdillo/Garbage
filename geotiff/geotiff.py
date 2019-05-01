@@ -1,5 +1,23 @@
 from osgeo import gdal, ogr, osr
 
+class MemImage:
+    path        = None
+    coordsPath  = None
+    invalidated = False
+
+    def __init__(self, path, coodsPath):
+        self.path       = path
+        self.coordsPath = coordsPath
+
+    def getPath(self):
+        if self.invalidated:
+            raise Exception("Mem image index has been replaced.")
+
+        return self.path
+
+    def invalidate(self):
+        self.invalidated = True
+
 def SliceDatasetToFile(ds, output, x, y, width, height):
     driver = gdal.GetDriverByName("GTiff")
     dst_ds = driver.Create(output, 
@@ -15,7 +33,7 @@ def SliceDatasetToFile(ds, output, x, y, width, height):
     f.ReadAsArray()
     f.FlushCache()
 
-    print(f"Built {output}")
+    print("Built {0}".format(output))
 
     return f
 
@@ -27,6 +45,8 @@ def SliceDataset(ds, x, y, width, height):
        ds.RasterCount, 
        gdal.GDT_Float32
     )
+
+    dst_ds = GDALMock()
 
     return WriteChunkedGTiff(ds, dst_ds, x, y, width, height)
 
@@ -44,13 +64,12 @@ def DatasetToJPEG(ds, output = None):
 
     coords = ct.TransformPoint(originX, originY)
 
-    (path, auxPath) = GTifToJPEG(ds, 3, output)
+    memImage = GTifToJPEG(ds, 3, output)
 
-    return (path, coords, auxPath)
+    return (memImage, coords)
 
-memo = {
-    "jpegIdx": 1
-}
+memoLimit = 10
+memo      = {"at" = 0, "list" = [None] * memoLimit}
 def GTifToJPEG(tif, bandCount, output = None):
     options = [
         "-ot Byte",
@@ -58,15 +77,23 @@ def GTifToJPEG(tif, bandCount, output = None):
     ]
 
     for bandIdx in range(1, bandCount + 1):
-        options.append(f"-b {bandIdx}")
+        options.append("-b {0}".format(bandIdx))
 
+    memImage = MemImage(output, output + ".aux.xml")
     if (output == None):
-        jpegIdx = memo.get("jpegIdxIdx", 1)
-        output = f"/vsimem/inmemjpeg{jpegIdx}.jpg"
-        memo["jpegIdx"] = jpegIdx + 1
+        idx = memo["at"] % memoLimit
+
+        output = "/vsimem/inmemjpeg{0}.jpg".format(idx)
+        memImage = MemImage(idx, output, output + ".aux.xml")
+
+        memo["list"][idx] = memImage
+        memo["at"] = (idx + 1) % memoLimit
+        prevImage = memo["list"][memo["at"]]
+        if prevImage is not None:
+            prevImage.invalidate()
 
     gdal.Translate(output, tif, options = " ".join(options))
-    return (output, output + ".aux.xml")
+    return memImage
 
 def WriteChunkedGTiff(ds, dst_ds, x, y, width, height):
     gt = ds.GetGeoTransform()

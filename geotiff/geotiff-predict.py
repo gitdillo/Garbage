@@ -15,6 +15,7 @@ from utils.bbox import draw_boxes
 from keras.models import load_model
 from tqdm import tqdm
 
+import model
 import numpy as np
 
 def main(argv):
@@ -49,7 +50,7 @@ def main(argv):
     runPrediction(tif, model, sliceSize, overlap)
 
 def runPrediction(tif, model, sliceSize, overlap):
-    modelConfig, weights = image.loadWeights(model)
+    modelConfig, weights = model.loadWeights(model)
     gdal.UseExceptions();
 
     ds = gdal.Open(tif)
@@ -73,8 +74,13 @@ def runPrediction(tif, model, sliceSize, overlap):
                 limit(rasterY, ys, sliceSize + my * overlap)
             )
 
-            path, coords, auxPath = geotiff.DatasetToJPEG(m)
-            annotations = image.imageDetection(modelConfig, weights, path)
+            memImage, coords = geotiff.DatasetToJPEG(m)
+            annotations = model.imageDetection(
+                modelConfig,
+                weights,
+                memImage.getPath()
+            )
+
             print(coords, annotations)
 
 def limit(upper, at, value):
@@ -82,45 +88,6 @@ def limit(upper, at, value):
 
 def zeroNegatives(v):
     return 0 if v < 0 else v
-
-def loadWeights(mpath):
-    config_path = mpath + "config.json"
-
-    with open(config_path) as config_buffer:
-        config = json.load(config_buffer)
-
-    net_h, net_w = 416, 416 # a multiple of 32, the smaller the faster
-    obj_thresh, nms_thresh = 0.5, 0.45
-
-    os.environ['CUDA_VISIBLE_DEVICES'] = config['train']['gpus']
-    infer_model = load_model(mpath + str(config['train']['saved_weights_name']))
-
-    print("Loaded", mpath)
-
-    return config, infer_model
-
-def imageDetection(config, model, image_path):
-    net_h, net_w = 416, 416 # a multiple of 32, the smaller the faster
-    obj_thresh, nms_thresh = 0.5, 0.45
-
-    image = cv2.imread(image_path)
-
-    # predict the bounding boxes
-    boxes = get_yolo_boxes(model, [image], net_h, net_w, config['model']['anchors'], obj_thresh, nms_thresh)[0]
-
-    # Put all bounding boxes and labels for this image in a json file
-    annotations = list()
-    for box in boxes:
-        annotations.append({
-            "label": config['model']['labels'][box.get_label()],
-            "score": float(box.score),
-            "xmax":box.xmax,
-            "xmin":box.xmin,
-            "ymax":box.ymax,
-            "ymin":box.ymin
-        })
-    
-    return annotations
 
 if __name__ == "__main__":
    main(sys.argv[1:])
