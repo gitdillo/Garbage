@@ -92,7 +92,6 @@ def GTifToJPEG(tif, bandCount, output = None):
     else:
         memImage = MemImage(output, output + ".aux.xml")
 
-    print("gdal Translating to", output)
     gdal.Translate(output, tif, options = " ".join(options))
     return memImage
 

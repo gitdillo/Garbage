@@ -58,11 +58,11 @@ def runPrediction(tif, model, sliceSize, overlap):
     rasterX = ds.RasterXSize
     rasterY = ds.RasterYSize
 
+    sliced = 0
+
     for y in range(0, math.ceil(rasterY / sliceSize)):
         ys = zeroNegatives(y * sliceSize - overlap)
         my = 1 if y == 0 else 2
-
-        print("Slicing on y", ys)
 
         for x in range(0, math.ceil(rasterX / sliceSize)):
             xs = zeroNegatives(x * sliceSize - overlap)
@@ -83,7 +83,12 @@ def runPrediction(tif, model, sliceSize, overlap):
                 memImage.getPath()
             )
 
-            print(coords, annotations)
+            if len(annotations) > 0:
+                print(coords, annotations)
+
+            sliced = sliced + 1
+            if sliced % 100 == 99:
+                print("Sliced another 100, at", xs, ys)
 
 def limit(upper, at, value):
     return upper - at if at + value > upper else value
