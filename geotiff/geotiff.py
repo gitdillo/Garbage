@@ -5,7 +5,7 @@ class MemImage:
     coordsPath  = None
     invalidated = False
 
-    def __init__(self, path, coodsPath):
+    def __init__(self, path, coordsPath):
         self.path       = path
         self.coordsPath = coordsPath
 
@@ -33,8 +33,6 @@ def SliceDatasetToFile(ds, output, x, y, width, height):
     f.ReadAsArray()
     f.FlushCache()
 
-    print("Built {0}".format(output))
-
     return f
 
 def SliceDataset(ds, x, y, width, height):
@@ -45,8 +43,6 @@ def SliceDataset(ds, x, y, width, height):
        ds.RasterCount, 
        gdal.GDT_Float32
     )
-
-    dst_ds = GDALMock()
 
     return WriteChunkedGTiff(ds, dst_ds, x, y, width, height)
 
@@ -69,7 +65,10 @@ def DatasetToJPEG(ds, output = None):
     return (memImage, coords)
 
 memoLimit = 10
-memo      = {"at" = 0, "list" = [None] * memoLimit}
+memo = {
+    "at": 0,
+    "list": [None] * memoLimit
+}
 def GTifToJPEG(tif, bandCount, output = None):
     options = [
         "-ot Byte",
@@ -79,19 +78,21 @@ def GTifToJPEG(tif, bandCount, output = None):
     for bandIdx in range(1, bandCount + 1):
         options.append("-b {0}".format(bandIdx))
 
-    memImage = MemImage(output, output + ".aux.xml")
     if (output == None):
         idx = memo["at"] % memoLimit
 
         output = "/vsimem/inmemjpeg{0}.jpg".format(idx)
-        memImage = MemImage(idx, output, output + ".aux.xml")
+        memImage = MemImage(output, output + ".aux.xml")
 
         memo["list"][idx] = memImage
         memo["at"] = (idx + 1) % memoLimit
         prevImage = memo["list"][memo["at"]]
         if prevImage is not None:
             prevImage.invalidate()
+    else:
+        memImage = MemImage(output, output + ".aux.xml")
 
+    print("gdal Translating to", output)
     gdal.Translate(output, tif, options = " ".join(options))
     return memImage
 

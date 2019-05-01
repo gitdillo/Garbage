@@ -9,12 +9,11 @@ from keras.models import load_model
 from tqdm import tqdm
 
 import re
-
 import numpy as np
 
 def loadWeights(mpath):
     #config_path = re.sub("(config.json)?$", "config.json", mpath)
-    config_path = mpath
+    config_path = mpath + "config.json"
 
     with open(config_path) as config_buffer:
         config = json.load(config_buffer)

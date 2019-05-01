@@ -15,7 +15,7 @@ from utils.bbox import draw_boxes
 from keras.models import load_model
 from tqdm import tqdm
 
-import model
+from model import loadWeights, imageDetection
 import numpy as np
 
 def main(argv):
@@ -50,7 +50,7 @@ def main(argv):
     runPrediction(tif, model, sliceSize, overlap)
 
 def runPrediction(tif, model, sliceSize, overlap):
-    modelConfig, weights = model.loadWeights(model)
+    modelConfig, weights = loadWeights(model)
     gdal.UseExceptions();
 
     ds = gdal.Open(tif)
@@ -61,6 +61,8 @@ def runPrediction(tif, model, sliceSize, overlap):
     for y in range(0, math.ceil(rasterY / sliceSize)):
         ys = zeroNegatives(y * sliceSize - overlap)
         my = 1 if y == 0 else 2
+
+        print("Slicing on y", ys)
 
         for x in range(0, math.ceil(rasterX / sliceSize)):
             xs = zeroNegatives(x * sliceSize - overlap)
@@ -74,8 +76,8 @@ def runPrediction(tif, model, sliceSize, overlap):
                 limit(rasterY, ys, sliceSize + my * overlap)
             )
 
-            memImage, coords = geotiff.DatasetToJPEG(m)
-            annotations = model.imageDetection(
+            memImage, coords = geotiff.DatasetToJPEG(m, "./tempslice.jpg")
+            annotations = imageDetection(
                 modelConfig,
                 weights,
                 memImage.getPath()
