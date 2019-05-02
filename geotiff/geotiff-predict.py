@@ -97,6 +97,10 @@ def runPrediction(tif, model, sliceSize, overlap):
 
                 print("Sliced another 100, at", xs, ys)
 
+    with open("./geotiff-predict-results.json", "w") as fileOutput:
+        fileOutput.write(json.dump(hits))
+
+
 def limit(upper, at, value):
     return upper - at if at + value > upper else value
 
