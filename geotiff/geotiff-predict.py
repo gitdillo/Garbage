@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from model import loadWeights, imageDetection
 import numpy as np
+import json
 
 def main(argv):
     tif       = None
@@ -60,6 +61,8 @@ def runPrediction(tif, model, sliceSize, overlap):
 
     sliced = 0
 
+    hits = []
+
     for y in range(0, int(math.ceil(rasterY / sliceSize))):
         ys = zeroNegatives(y * sliceSize - overlap)
         my = 1 if y == 0 else 2
@@ -84,10 +87,14 @@ def runPrediction(tif, model, sliceSize, overlap):
             )
 
             if len(annotations) > 0:
+                hits.append({"coords": coords, "annotations": annotations})
                 print(coords, annotations)
 
             sliced = sliced + 1
             if sliced % 100 == 99:
+                with open("./geotiff-predict-results.json", "w") as fileOutput:
+                    fileOutput.write(json.dump(hits))
+
                 print("Sliced another 100, at", xs, ys)
 
 def limit(upper, at, value):
