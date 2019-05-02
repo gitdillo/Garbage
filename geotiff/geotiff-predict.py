@@ -60,11 +60,11 @@ def runPrediction(tif, model, sliceSize, overlap):
 
     sliced = 0
 
-    for y in range(0, math.ceil(rasterY / sliceSize)):
+    for y in range(0, int(math.ceil(rasterY / sliceSize))):
         ys = zeroNegatives(y * sliceSize - overlap)
         my = 1 if y == 0 else 2
 
-        for x in range(0, math.ceil(rasterX / sliceSize)):
+        for x in range(0, int(math.ceil(rasterX / sliceSize))):
             xs = zeroNegatives(x * sliceSize - overlap)
             
             mx = 1 if x == 0 else 2
