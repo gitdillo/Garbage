@@ -1,3 +1,4 @@
+from decimal import Decimal
 from osgeo import gdal, ogr, osr
 
 class MemImage:
@@ -124,8 +125,10 @@ def WriteChunkedGTiff(ds, dst_ds, x, y, width, height):
 def GetExtent(gt, cols, rows):
     ext=[]
 
-    xarr=[0, cols]
-    yarr=[0, rows]
+    gt = map(Decimal, gt)
+
+    xarr = map(Decimal, [0, cols])
+    yarr = map(Decimal, [0, rows])
 
     for px in xarr:
         for py in yarr:
@@ -141,12 +144,14 @@ def GetExtent(gt, cols, rows):
 def GetCoordinatesFromPixelBox(gt, cols, rows, x, y, width, height):
     ext = GetExtent(gt, cols, rows)
 
-    xOrigin = gt[0]
-    yOrigin = gt[3]
+    cols, rows, x, y = map(Decimal, [cols, rows, x, y])
+
+    xOrigin = Decimal(gt[0])
+    yOrigin = Decimal(gt[3])
 
     bottomLeft, topLeft, topRight, bottomRight = ext
-    xlen = topRight[0] - topLeft[0]
-    ylen = bottomRight[1] - topRight[1]
+    xlen = Decimal(topRight[0]) - Decimal(topLeft[0])
+    ylen = Decimal(bottomRight[1]) - Decimal(topRight[1])
 
     # Notice the negative leap with regards to Y.
     return [
