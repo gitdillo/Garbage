@@ -132,7 +132,7 @@ def runPrediction(opts):
                 },
                     {
                     "label": annotation["label"],
-                    "score": annotation["score"]
+                    "score": Decimal(annotation["score"] * 1)
                 }
                 )
                 hits = hits + 1
