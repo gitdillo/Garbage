@@ -82,7 +82,7 @@ def runPrediction(opts):
     sliced = 0
 
     geojson = {
-        "type": "FeatureList",
+        "type": "FeatureCollection",
         "features": []
     }
 
@@ -178,8 +178,8 @@ def addFeatureFromBoundingBox(geojson, ds, bbox, properties = {}):
                 [
                     topLeft,
                     topRight,
-                    bottomLeft,
-                    bottomRight
+                    bottomRight,
+                    bottomLeft
                 ]
             ]
         },
