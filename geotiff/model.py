@@ -41,7 +41,7 @@ def imageDetection(config, model, image_path):
     for box in boxes:
         annotations.append({
             "label": config['model']['labels'][box.get_label()],
-            "score": float(box.score),
+            "score": box.get_score(),
             "xmax":box.xmax,
             "xmin":box.xmin,
             "ymax":box.ymax,
