@@ -47,7 +47,7 @@ def SliceDataset(ds, x, y, width, height):
 
     return WriteChunkedGTiff(ds, dst_ds, x, y, width, height)
 
-def DatasetToJPEG(ds, output = None):
+def GetCoords(ds):
     geo = ds.GetGeoTransform()
 
     originX = geo[0]
@@ -59,8 +59,10 @@ def DatasetToJPEG(ds, output = None):
     srsLatLong = srs.CloneGeogCS()
     ct = osr.CoordinateTransformation(srs, srsLatLong)
 
-    coords = ct.TransformPoint(originX, originY)
+    return ct.TransformPoint(originX, originY)
 
+def DatasetToJPEG(ds, output = None):
+    coords = GetCoords(ds)
     memImage = GTifToJPEG(ds, 3, output)
 
     return (memImage, coords)

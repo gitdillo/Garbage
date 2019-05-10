@@ -30,10 +30,11 @@ def main(argv):
             "overlap=",
             "ignore-negatives", 
             "temp-slice=", 
-            "output="
+            "output=",
+            "verbose"
         ])
     except getopt.GetoptError:
-        print('predict.py -tif <geotiff.tif> --model <config.json>')
+        print('err: predict.py -tif <geotiff.tif> --model <config.json>')
         sys.exit(2)
 
     for opt, arg in opts:
@@ -54,6 +55,8 @@ def main(argv):
             predOpts.output = arg
         elif opt == "--temp-slice":
             predOpts.tempSlice = arg
+        elif opt == "--verbose":
+            predOpts.verbose = True
 
     if (predOpts.tif == None or predOpts.model == None):
         print('predict.py -tif <geotiff.tif> --model <config.json>')
@@ -69,10 +72,15 @@ class PredictionOptions:
     sliceSize = 500
     overlap = 50
     ignoreNegatives = False
+    verbose = False
 
 def runPrediction(opts):
     modelConfig, weights = loadWeights(opts.model)
     gdal.UseExceptions();
+    
+    def printv(*args):
+        if opts.verbose == True:
+            print args[0:]
 
     ds = gdal.Open(opts.tif)
 
@@ -95,23 +103,38 @@ def runPrediction(opts):
     yCeil = int(math.ceil(rasterY / sliceSize))
     xCeil = int(math.ceil(rasterX / sliceSize))
 
+    initialCoords = geotiff.GetCoords(ds)
+    printv("Slice length: {0}x{1}, Raster size: {2}x{3}, origin coords: {4}, {5}".format(
+        xCeil, yCeil, rasterX, rasterY, initialCoords[0], initialCoords[1]
+    ))
+
+
     for y in range(0, yCeil):
         ys = zeroNegatives(y * sliceSize - overlap)
         my = 1 if y == 0 else 2
 
         for x in range(0, xCeil):
             xs = zeroNegatives(x * sliceSize - overlap)
-            
+
             mx = 1 if x == 0 else 2
+            
+            w = limit(rasterX, xs, sliceSize + mx * overlap)
+            h = limit(rasterY, ys, sliceSize + my * overlap)
+            
             m = geotiff.SliceDataset(
                 ds,
                 xs,
                 ys,
-                limit(rasterX, xs, sliceSize + mx * overlap),
-                limit(rasterY, ys, sliceSize + my * overlap)
+                w,
+                h
             )
 
             memImage, coords = geotiff.DatasetToJPEG(m, opts.tempSlice)
+
+            printv("Slicing: {0}x{1} {2}w {3}h, coords: [{4}, {5}]".format(
+                xs, ys, w, h, coords[0], coords[1]
+            ))
+
             annotations = imageDetection(
                 modelConfig,
                 weights,
@@ -124,7 +147,7 @@ def runPrediction(opts):
                     print("Ignored a negative score detection.")
                     continue
 
-                addFeatureFromBoundingBox(geojson, m, {
+                addedCoords = addFeatureFromBoundingBox(geojson, m, {
                     "x": annotation["xmin"],
                     "y": annotation["ymin"],
                     "width": annotation["xmax"] - annotation["xmin"],
@@ -135,6 +158,8 @@ def runPrediction(opts):
                     "score": Decimal(annotation["score"] * 1)
                 }
                 )
+
+                printv("Annotation at", addedCoords)
                 hits = hits + 1
 
             if hits > 0:
@@ -186,6 +211,8 @@ def addFeatureFromBoundingBox(geojson, ds, bbox, properties = {}):
 
         "properties": properties
     })
+
+    return [topLeft, topRight, bottomRight, bottomLeft]
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
