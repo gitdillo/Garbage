@@ -6,33 +6,30 @@ from osgeo import gdal, ogr, osr
 import sys, getopt
 
 import geotiff
+from geojson import newCollection, addFeatureFromBoundingBox
+
 import time
 import math
 from decimal import Decimal
 
-from utils.utils import get_yolo_boxes, makedirs
-from utils.bbox import draw_boxes
-from keras.models import load_model
-
-from model import loadWeights, imageDetection
 import numpy as np
 import json
-
-from geojson import newCollection, addFeatureFromBoundingBox
+import nanonets as nano
 
 def main(argv):
     predOpts = PredictionOptions()
 
     try:
         opts, args = getopt.getopt(argv, "t:m:", [
+            "output=",
             "tif=",
-            "model=",
             "slice=",
             "overlap=",
-            "ignore-negatives", 
             "temp-slice=", 
-            "output=",
-            "verbose"
+            "verbose",
+            "cut=",
+            "auth=",
+            "model=",
         ])
     except getopt.GetoptError:
         print('err: predict.py -tif <geotiff.tif> --model <config.json>')
@@ -44,51 +41,62 @@ def main(argv):
             sys.exit()
         elif opt in ("-t", "--tif"):
             predOpts.tif = arg
-        elif opt in ("-m", "--model"):
-            predOpts.model = arg
         elif opt == "--slice":
             predOpts.sliceSize = int(arg)
         elif opt == "--overlap":
             predOpts.overlap = int(arg)
-        elif opt == "--ignore-negatives":
-            predOpts.ignoreNegatives = True
         elif opt == "--output":
             predOpts.output = arg
-        elif opt == "--temp-slice":
-            predOpts.tempSlice = arg
         elif opt == "--verbose":
             predOpts.verbose = True
+        elif opt == "--temp-slice":
+            predOpts.tempSlice = arg
+        elif opt == "--auth":
+            predOpts.auth = arg
+        elif opt == "--model":
+            predOpts.model = arg
+        elif opt == "--cut":
+            x, y, rows, columns = map(lambda a : int(a), arg.split(","))
 
-    if (predOpts.tif == None or predOpts.model == None):
-        print('predict.py -tif <geotiff.tif> --model <config.json>')
+            predOpts.x       = x
+            predOpts.y       = y
+            predOpts.rows    = rows
+            predOpts.columns = columns
+
+    if (predOpts.tif == None or predOpts.auth == None or predOpts.model == None):
+        print('predict.py --auth <api key> --model <model> --tif <geotiff.tif>')
         sys.exit(2)
 
     runPrediction(predOpts)
 
 class PredictionOptions:
+    output = "./nanonets-predict-results.json"
     tempSlice = "./tempslice.jpg"
-    output = "./geotiff-predict-results.json"
-    tif = None
+    auth = None
     model = None
+    tif = None
     sliceSize = 500
     overlap = 50
-    ignoreNegatives = False
     verbose = False
+    x = 0
+    y = 0
+    rows = 1
+    columns = 1
 
 def runPrediction(opts):
-    modelConfig, weights = loadWeights(opts.model)
     gdal.UseExceptions();
-    
+    ds = gdal.Open(opts.tif)
+
     def printv(*args):
         if opts.verbose == True:
             print(args[0:])
 
-    ds = gdal.Open(opts.tif)
-
-    geojson = newCollection() 
+    geojson = {
+        "type": "FeatureCollection",
+        "features": []
+    }
 
     output = opts.output
-    hits = []
 
     sliceSize = opts.sliceSize
     overlap = opts.overlap
@@ -103,6 +111,10 @@ def runPrediction(opts):
         xCeil, yCeil, rasterX, rasterY, initialCoords[0], initialCoords[1]
     ))
 
+    def writeJSON():
+        with open(output, "w") as fileOutput:
+            fileOutput.write(json.dumps(geojson, cls=DecimalEncoder))
+
     class Memo:
         sliced = 0
 
@@ -114,49 +126,45 @@ def runPrediction(opts):
             xs, ys, w, h, coords[0], coords[1]
         ))
 
-        annotations = imageDetection(
-            modelConfig,
-            weights,
-            memImage.getPath()
-        )
+        res = nano.predictImage(opts.auth, opts.model, memImage.getPath())
+        if res["message"] != "Success":
+            printv("Failed to predict:", memImage.getPath())
+            return
 
-        hits = 0
-        for annotation in annotations:
-            if annotation["score"] < 0 and opts.ignoreNegatives:
-                print("Ignored a negative score detection.")
+        for result in res["result"]:
+            if result["message"] != "Success":
+                printv("Failed prediction.")
                 continue
 
-            addedCoords = addFeatureFromBoundingBox(geojson, m, {
-                "x": annotation["xmin"],
-                "y": annotation["ymin"],
-                "width": annotation["xmax"] - annotation["xmin"],
-                "height": annotation["ymax"] - annotation["ymin"]
-            },
-                {
-                "label": annotation["label"],
-                "score": Decimal(annotation["score"] * 1)
-            }
-            )
+            predictions = result["prediction"]
+            for prediction in predictions:
+                addedCoords = addFeatureFromBoundingBox(geojson, m, {
+                    "x": prediction["xmin"],
+                    "y": prediction["ymin"],
+                    "width": prediction["xmax"] - prediction["xmin"],
+                    "height": prediction["ymax"] - prediction["ymin"]
+                },
+                    {
+                    "label": prediction["label"],
+                    "score": Decimal(prediction["score"] * 1)
+                }
+                )
 
-            printv("Annotation at", addedCoords)
-            hits = hits + 1
+            if len(predictions) > 0:
+                print(len(predictions), "hits at {0}x{1}".format(xs,ys))
+                writeJSON()
 
-        if hits > 0:
-            print(hits, "hits at {0}x{1}".format(xs,ys))
-            with open(output, "w") as fileOutput:
-                fileOutput.write(json.dumps(geojson, cls=DecimalEncoder))
 
         memo.sliced = memo.sliced + 1
         if memo.sliced % 100 == 99:
             print("Sliced another 100, at", xs, ys)
 
     geotiff.LoopSlices(
-        ds, sliceSize, overlap,
-        callback
+        ds, sliceSize, overlap, callback,
+        opts.x, opts.y, opts.columns, opts.rows,
     )
 
-    with open(output, "w") as fileOutput:
-        fileOutput.write(json.dumps(geojson, cls=DecimalEncoder))
+    writeJSON()
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):

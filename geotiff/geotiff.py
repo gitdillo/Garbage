@@ -1,5 +1,6 @@
 from decimal import Decimal
 from osgeo import gdal, ogr, osr
+import math
 
 class MemImage:
     path        = None
@@ -163,3 +164,54 @@ def GetCoordinatesFromPixelBox(gt, cols, rows, x, y, width, height):
         yOrigin - ((y + height) / rows) * ylen,
     ]
 
+
+def LoopSlices(
+    ds, sliceSize, overlap, callback,
+    startX = 0, startY = 0, maxX = None, maxY = None
+):
+    rasterX = ds.RasterXSize
+    rasterY = ds.RasterYSize
+
+    yCeil = int(math.ceil(rasterY / sliceSize))
+    xCeil = int(math.ceil(rasterX / sliceSize))
+
+    yAmount = 0
+    xAmount = 0
+
+    for y in range(startY, yCeil):
+        if maxY != None and maxY <= yAmount:
+            break
+
+        ys = zeroNegatives(y * sliceSize - overlap)
+        my = 1 if y == 0 else 2
+
+        yAmount = yAmount + 1
+        xAmount = 0
+
+        for x in range(startX, xCeil):
+            if maxX != None and maxX <= xAmount:
+                break
+
+            xs = zeroNegatives(x * sliceSize - overlap)
+
+            mx = 1 if x == 0 else 2
+            
+            w = limit(rasterX, xs, sliceSize + mx * overlap)
+            h = limit(rasterY, ys, sliceSize + my * overlap)
+            
+            m = SliceDataset(
+                ds,
+                xs,
+                ys,
+                w,
+                h
+            )
+
+            xAmount = xAmount + 1
+            callback(m, xs, ys, w, h)
+
+def limit(upper, at, value):
+    return upper - at if at + value > upper else value
+
+def zeroNegatives(v):
+    return 0 if v < 0 else v
