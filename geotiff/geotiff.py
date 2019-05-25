@@ -128,10 +128,10 @@ def WriteChunkedGTiff(ds, dst_ds, x, y, width, height):
 def GetExtent(gt, cols, rows):
     ext=[]
 
-    gt = map(Decimal, gt)
+    gt = amap(Decimal, gt)
 
-    xarr = map(Decimal, [0, cols])
-    yarr = map(Decimal, [0, rows])
+    xarr = amap(Decimal, [0, cols])
+    yarr = amap(Decimal, [0, rows])
 
     for px in xarr:
         for py in yarr:
@@ -147,7 +147,7 @@ def GetExtent(gt, cols, rows):
 def GetCoordinatesFromPixelBox(gt, cols, rows, x, y, width, height):
     ext = GetExtent(gt, cols, rows)
 
-    cols, rows, x, y = map(Decimal, [cols, rows, x, y])
+    cols, rows, x, y = amap(Decimal, [cols, rows, x, y])
 
     xOrigin = Decimal(gt[0])
     yOrigin = Decimal(gt[3])
@@ -164,6 +164,8 @@ def GetCoordinatesFromPixelBox(gt, cols, rows, x, y, width, height):
         yOrigin - ((y + height) / rows) * ylen,
     ]
 
+def amap(f, l):
+    return list(map(f, l))
 
 def LoopSlices(
     ds, sliceSize, overlap, callback,

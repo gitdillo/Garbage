@@ -15,59 +15,75 @@ from decimal import Decimal
 import numpy as np
 import json
 import nanonets as nano
+import arger
 
 def main(argv):
     predOpts = PredictionOptions()
+    commands = [dict(
+        command =  "auth",
+        input =  True,
+        required =  True,
+    ),
+    dict(
+        command =  "model",
+        input =  True,
+        required =  True,
+    ),
+    dict(
+        command =  "tif",
+        alias =  ["t"],
+        input =  True,
+        required =  True,
+    ),
+    dict(
+        command =  "slice",
+        input =  True
+    ),
+    dict(
+        command =  "overlap",
+        input =  True
+    ),
+    dict(
+        command =  "temp-slice",
+        key = "tempSlice",
+        input =  True
+    ),
+    dict(
+        command =  "verbose",
+    ),
+    dict(
+        command =  "cut",
+        input =  True,
+        example = "200,200,2,2"
+    ),
+    dict(
+        command =  "grid",
+    ),
+    dict(
+        command =  "info",
+    )]
 
     try:
-        opts, args = getopt.getopt(argv, "t:m:", [
-            "output=",
-            "tif=",
-            "slice=",
-            "overlap=",
-            "temp-slice=", 
-            "verbose",
-            "cut=",
-            "auth=",
-            "model=",
-        ])
-    except getopt.GetoptError:
-        print('err: predict.py -tif <geotiff.tif> --model <config.json>')
+        opts = arger.parseArgs(argv, commands)
+    except Exception as err:
+        arger.printHelp("nanonets-predict.py", commands)
         sys.exit(2)
 
-    for opt, arg in opts:
-        if opt == '-h':
-            print('predict.py -tif <geotiff.tif> --model <config.json>')
-            sys.exit()
-        elif opt in ("-t", "--tif"):
-            predOpts.tif = arg
-        elif opt == "--slice":
-            predOpts.sliceSize = int(arg)
-        elif opt == "--overlap":
-            predOpts.overlap = int(arg)
-        elif opt == "--output":
-            predOpts.output = arg
-        elif opt == "--verbose":
-            predOpts.verbose = True
-        elif opt == "--temp-slice":
-            predOpts.tempSlice = arg
-        elif opt == "--auth":
-            predOpts.auth = arg
-        elif opt == "--model":
-            predOpts.model = arg
-        elif opt == "--cut":
-            x, y, rows, columns = map(lambda a : int(a), arg.split(","))
+    if opts.get("cut", None) != None:
+        cut = opts.get("cut")
+        x, y, rows, columns = amap(lambda a : int(a), cut.split(","))
 
-            predOpts.x       = x
-            predOpts.y       = y
-            predOpts.rows    = rows
-            predOpts.columns = columns
+        predOpts.x       = x
+        predOpts.y       = y
+        predOpts.rows    = rows
+        predOpts.columns = columns
+        del opts["cut"]
 
-    if (predOpts.tif == None or predOpts.auth == None or predOpts.model == None):
-        print('predict.py --auth <api key> --model <model> --tif <geotiff.tif>')
-        sys.exit(2)
-
+    predOpts.__dict__.update(opts)
     runPrediction(predOpts)
+
+def amap(f, l):
+    return list(map(f, l))
 
 class PredictionOptions:
     output = "./nanonets-predict-results.json"
@@ -82,13 +98,15 @@ class PredictionOptions:
     y = 0
     rows = 1
     columns = 1
+    grid = False
+    info = False
 
 def runPrediction(opts):
     gdal.UseExceptions();
     ds = gdal.Open(opts.tif)
 
     def printv(*args):
-        if opts.verbose == True:
+        if opts.verbose == True or opts.info == True:
             print(args[0:])
 
     geojson = {
@@ -106,10 +124,21 @@ def runPrediction(opts):
     yCeil = int(math.ceil(rasterY / sliceSize))
     xCeil = int(math.ceil(rasterX / sliceSize))
 
+    x = opts.x if opts.grid else int(math.floor(opts.x / sliceSize))
+    y = opts.y if opts.grid else int(math.floor(opts.y / sliceSize))
+
+    if opts.grid == False:
+        opts.columns = opts.columns + 1
+        opts.rows    = opts.rows + 1
+
     initialCoords = geotiff.GetCoords(ds)
-    printv("Slice length: {0}x{1}, Raster size: {2}x{3}, origin coords: {4}, {5}".format(
-        xCeil, yCeil, rasterX, rasterY, initialCoords[0], initialCoords[1]
+    printv("Grid size: {0}x{1}, Raster size: {2}x{3}, origin coords: {4}, {5}, starting at: {6}x{7}, slicing: {8} columns and {9} rows".format(
+        xCeil, yCeil, rasterX, rasterY, initialCoords[0], initialCoords[1], x, y,
+        opts.columns, opts.rows
     ))
+
+    if opts.info == True:
+        return
 
     def writeJSON():
         with open(output, "w") as fileOutput:
@@ -159,9 +188,12 @@ def runPrediction(opts):
         if memo.sliced % 100 == 99:
             print("Sliced another 100, at", xs, ys)
 
+        # Sleep to be lenient with hits on API.
+        time.sleep(0.2)
+
     geotiff.LoopSlices(
         ds, sliceSize, overlap, callback,
-        opts.x, opts.y, opts.columns, opts.rows,
+        x, y, opts.columns, opts.rows,
     )
 
     writeJSON()
