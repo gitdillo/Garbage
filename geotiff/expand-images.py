@@ -34,7 +34,11 @@ def main(argv):
         command =  "padding",
         alias = ["p"],
         input =  True
-    )
+    ),
+    dict(
+        command =  "by-annotation",
+        key = "annotation"
+    ),
     ]
 
     try:
@@ -57,6 +61,7 @@ class Options:
     tif = None
     geojson = None
     padding = 0
+    annotation = False
 
 def expandImages(opts):
     gdal.UseExceptions();
@@ -72,7 +77,8 @@ def expandImages(opts):
     for feature in geojson["features"]:
         boxes = geotiff.getPixelBoxesFromShapes(
             ds,
-            feature["geometry"]["coordinates"]
+            feature["geometry"]["coordinates"],
+            score = feature["properties"]["score"]
         )
 
         for box in boxes:
@@ -90,50 +96,84 @@ def expandImages(opts):
     for col in grid:
         cols = grid[col]
         for row in cols:
-            nx = int(col * 500)
-            ny = int(row * 500)
-            width = 500
-            height = 500
+            if opts.annotation == True:
+                stored = byAnnotation(opts, ds, col, row, cols[row], stored)
+            else:
+                byImage(opts, ds, col, row, cols[row], stored)
+                stored = stored + 1
 
-            slice = geotiff.SliceDataset(ds, nx, ny, width, height)
-            memImage, c = geotiff.DatasetToJPEG(slice, output = "./tempslice.jpg")
 
-            image = cv2.imread(memImage.getPath())
-            thickness = 2
-
-            for box in cols[row]:
-                x1, x2 = amap(limiter(width, thickness), [
-                    box.xmin - nx - opts.padding,
-                    box.xmax - nx + opts.padding
-                ])
-
-                y1, y2 = amap(limiter(height, thickness), [
-                    box.ymin - ny - opts.padding,
-                    box.ymax - ny + opts.padding
-                ])
-
-                cv2.rectangle(
-                    img       = image, 
-                    pt1       = (x1, y1),
-                    pt2       = (x2, y2),
-                    color     = [0,0,255],
-                    thickness = thickness
-                )
-
-            outputFile = os.path.join(opts.output, "result-{0}.jpg".format(stored))
-            cv2.imwrite(outputFile, np.uint8(image))
-            os.rename(
-                memImage.getPath() + ".aux.xml",
-                outputFile + ".aux.xml"
-            )
-
-            stored = stored + 1
-
-    if stored > 0:
+    if stored > 0 and os.path.exists("./tempslice.jpg"):
         os.remove("./tempslice.jpg")
+        if os.path.exists("./tempslice.jpg.aux.xml"):
+            os.remove("./tempslice.jpg.aux.xml")
+
+def byImage(opts, ds, col, row, boxes, stored):
+    nx = int(col * 500)
+    ny = int(row * 500)
+    width = 500
+    height = 500
+
+    slice = geotiff.SliceDataset(ds, nx, ny, width, height)
+    memImage, c = geotiff.DatasetToJPEG(slice, output = "./tempslice.jpg")
+
+    image = cv2.imread(memImage.getPath())
+    thickness = 2
+
+    for box in boxes:
+        x1, x2 = amap(limiter(width, thickness), [
+            box.xmin - nx - opts.padding,
+            box.xmax - nx + opts.padding
+        ])
+
+        y1, y2 = amap(limiter(height, thickness), [
+            box.ymin - ny - opts.padding,
+            box.ymax - ny + opts.padding
+        ])
+
+        cv2.rectangle(
+            img       = image, 
+            pt1       = (x1, y1),
+            pt2       = (x2, y2),
+            color     = [0,0,255],
+            thickness = thickness
+        )
+
+    outputFile = os.path.join(opts.output, "result-{0}.jpg".format(stored))
+    cv2.imwrite(outputFile, np.uint8(image))
+    os.rename(
+        memImage.getPath() + ".aux.xml",
+        outputFile + ".aux.xml"
+    )
+
+
+def byAnnotation(opts, ds, col, row, boxes, stored):
+    for box in boxes:
+        x1, y1, x2, y2 = [
+            box.xmin - opts.padding,
+            box.ymin - opts.padding,
+            box.xmax + opts.padding,
+            box.ymax + opts.padding,
+        ]
+
+        slice = geotiff.SliceDataset(ds, x1, y1, x2 - x1, y2 - y1)
+
+        score = int(box.score * 100)
+        outputFile = os.path.join(
+            opts.output,
+            "{1} annotation-{0}.jpg".format(stored, score)
+        )
+        memImage, c = geotiff.DatasetToJPEG(slice, output = outputFile)
+
+        stored = stored + 1
+
+    return stored
 
 def limiter(width, thickness):
     def cb(num):
+        if width == None:
+            return 0 + thickness if num + thickness < 0 else num
+
         return 0 + thickness if num + thickness < 0 else width - thickness if num + thickness > width else num
 
     return cb

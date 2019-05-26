@@ -166,8 +166,8 @@ def GetCoordinatesFromPixelBox(gt, cols, rows, x, y, width, height):
     ]
 
 
-Box = namedtuple("Box", ["xmin", "ymin", "xmax", "ymax"])
-def getPixelBoxesFromShapes(ds, shapes):
+Box = namedtuple("Box", ["xmin", "ymin", "xmax", "ymax", "score"])
+def getPixelBoxesFromShapes(ds, shapes, score = None):
     cols = ds.RasterXSize
     rows = ds.RasterYSize
 
@@ -206,6 +206,7 @@ def getPixelBoxesFromShapes(ds, shapes):
             ymin = int(ymin),
             xmax = int(xmax),
             ymax = int(ymax),
+            score = score
         ))
 
     return parsed
