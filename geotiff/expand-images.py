@@ -12,7 +12,7 @@ from decimal import Decimal
 import arger
 
 def main(argv):
-    predOpts = PredictionOptions()
+    imgOpts = Options()
     commands = [
     dict(
         command =  "tif",
@@ -46,19 +46,19 @@ def main(argv):
     if opts.get("padding"):
         opts["padding"] = int(opts["padding"])
 
-    predOpts.__dict__.update(opts)
-    runPrediction(predOpts)
+    imgOpts.__dict__.update(opts)
+    expandImages(imgOpts)
 
 def amap(f, l):
     return list(map(f, l))
 
-class PredictionOptions:
+class Options:
     output = None
     tif = None
     geojson = None
     padding = 0
 
-def runPrediction(opts):
+def expandImages(opts):
     gdal.UseExceptions();
     ds = gdal.Open(opts.tif)
 
