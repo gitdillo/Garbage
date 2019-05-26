@@ -1,6 +1,7 @@
 from decimal import Decimal
 from osgeo import gdal, ogr, osr
 import math
+from collections import namedtuple
 
 class MemImage:
     path        = None
@@ -163,6 +164,51 @@ def GetCoordinatesFromPixelBox(gt, cols, rows, x, y, width, height):
         xOrigin + ((x + width) / cols) * xlen,
         yOrigin - ((y + height) / rows) * ylen,
     ]
+
+
+Box = namedtuple("Box", ["xmin", "ymin", "xmax", "ymax"])
+def getPixelBoxesFromShapes(ds, shapes):
+    cols = ds.RasterXSize
+    rows = ds.RasterYSize
+
+    gt = ds.GetGeoTransform()
+
+    ext = GetExtent(gt, cols, rows)
+
+    xOrigin = Decimal(gt[0])
+    yOrigin = Decimal(gt[3])
+
+    bottomLeft, topLeft, topRight, bottomRight = ext
+    xlen = Decimal(topRight[0]) - Decimal(topLeft[0])
+    ylen = Decimal(bottomRight[1]) - Decimal(topRight[1])
+
+    parsed = []
+    for shape in shapes:
+        xmin = False
+        ymin = False
+        xmax = False
+        ymax = False
+
+        for coords in shape:
+            lon, lat = amap(Decimal, coords)
+
+            x = (lon - xOrigin) / xlen * cols
+            y = (yOrigin - lat) / ylen * rows
+
+            xmin = x if not xmin or x < xmin else xmin
+            ymin = y if not ymin or y < ymin else ymin
+
+            xmax = x if not xmax or x > xmax else xmax
+            ymax = y if not ymin or y > ymax else ymax
+
+        parsed.append(Box(
+            xmin = int(xmin),
+            ymin = int(ymin),
+            xmax = int(xmax),
+            ymax = int(ymax),
+        ))
+
+    return parsed
 
 def amap(f, l):
     return list(map(f, l))
